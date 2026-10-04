@@ -1,0 +1,27 @@
+--- a/code/dataset.py
++++ b/code/dataset.py
+@@ -232,6 +232,13 @@
+ 
+ 
++def _worker_init_fn(worker_id: int) -> None:
++    """Khởi tạo seed độc lập cho từng worker tiến trình con (picklable trên Windows)."""
++    worker_seed = (torch.initial_seed() + worker_id) % (2**32)
++    np.random.seed(worker_seed)
++    random.seed(worker_seed)
++
++
+ def make_loader(df: pd.DataFrame, images_dir: Union[str, Path], transform, batch_size: int,
+                 train: bool, sampler: Optional[str] = None, num_workers: int = 2) -> DataLoader:
+     """Tạo DataLoader tương thích chuẩn."""
+@@ -248,11 +255,6 @@
+         sampler_obj = WeightedRandomSampler(weights=weights_tensor, num_samples=len(weights_tensor), replacement=True)
+         shuffle = False
+ 
+-    def _worker_init_fn(worker_id: int):
+-        worker_seed = (torch.initial_seed() + worker_id) % (2**32)
+-        np.random.seed(worker_seed)
+-        random.seed(worker_seed)
+-
+     use_cuda = torch.cuda.is_available()
+     drop_last = train and (len(ds) > batch_size)
+ 

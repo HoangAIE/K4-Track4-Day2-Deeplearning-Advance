@@ -1,0 +1,92 @@
+--- a/code/benchmark.py
++++ b/code/benchmark.py
+@@ -10,6 +10,8 @@
+ from __future__ import annotations
+ 
++import argparse
++import json
++from pathlib import Path
+ import time
+ from typing import Callable, Dict, Optional, Union
+ import numpy as np
+@@ -104,3 +106,75 @@
+     report["k_views"] = k_views
+     return report
++
++
++def main():
++    """CLI interface for model latency and complexity profiling.
++    
++    Usage:
++        python code/benchmark.py --models resnet50 convnext_tiny --batch_size 1 --device cuda
++        python code/benchmark.py --models all --batch_size 1 --dtype fp32 --out runs/benchmark_results.json
++    """
++    from model import build_model, count_params, count_gmacs, SUGGESTED_BACKBONES
++
++    parser = argparse.ArgumentParser(description="Đo độ trễ và độ phức tạp mô hình.")
++    parser.add_argument("--models", nargs="+", default=["resnet50"],
++                        help="Tên các model cần đo (ví dụ resnet50 convnext_tiny) hoặc 'all'")
++    parser.add_argument("--batch_size", type=int, default=1, help="Kích thước batch (mặc định 1)")
++    parser.add_argument("--img_size", type=int, default=224, help="Kích thước ảnh (mặc định 224)")
++    parser.add_argument("--dtype", choices=["fp32", "amp", "fp16"], default="fp32", help="Kiểu dữ liệu")
++    parser.add_argument("--device", default="cuda", help="Thiết bị (cuda hoặc cpu)")
++    parser.add_argument("--warmup", type=int, default=10, help="Số lần chạy warmup")
++    parser.add_argument("--iters", type=int, default=100, help="Số lần chạy đo đạc")
++    parser.add_argument("--out", default=None, help="Đường dẫn file JSON lưu kết quả")
++    args = parser.parse_args()
++
++    # Xử lý danh sách model (hỗ trợ phân tách dấu phẩy hoặc khoảng trắng)
++    model_list = []
++    for item in args.models:
++        for m in item.split(","):
++            m = m.strip()
++            if m:
++                model_list.append(m)
++
++    if "all" in model_list:
++        model_list = [
++            "resnet50",
++            "convnext_tiny",
++            "swin_tiny_patch4_window7_224",
++            "efficientnet_b0",
++            "mobilenetv3_large_100",
++        ]
++
++    results = []
++    print(f"\n{'Model':<30} | {'Tag':<16} | {'Params(M)':<10} | {'GMACs':<7} | {'p50(ms)':<8} | {'p95(ms)':<8} | {'p99(ms)':<8} | {'Mean(ms)':<9} | {'Img/s':<8}")
++    print("-" * 120)
++
++    for name in model_list:
++        model = build_model(name, pretrained=True, num_classes=9)
++        params = count_params(model)
++        gmacs = count_gmacs(model, img_size=args.img_size)
++        tag = getattr(model, "pretrained_tag", "unknown")
++        rep = latency_report(
++            model,
++            batch_size=args.batch_size,
++            img_size=args.img_size,
++            dtype=args.dtype,
++            device=args.device,
++            warmup=args.warmup,
++            iters=args.iters,
++        )
++        res_entry = {
++            "model": name,
++            "tag": tag,
++            "params_m": params,
++            "gmacs": gmacs,
++            **rep,
++        }
++        results.append(res_entry)
++        print(f"{name:<30} | {tag:<16} | {params:<10.3f} | {gmacs:<7.3f} | {rep['p50']:<8.2f} | {rep['p95']:<8.2f} | {rep['p99']:<8.2f} | {rep['mean']:<9.2f} | {rep['images_per_s']:<8.1f}")
++
++    if args.out:
++        out_p = Path(args.out)
++        out_p.parent.mkdir(parents=True, exist_ok=True)
++        with open(out_p, "w", encoding="utf-8") as f:
++            json.dump(results, f, indent=2)
++        print(f"\nĐã lưu kết quả benchmark vào: {args.out}")
++
++
++if __name__ == "__main__":
++    main()
